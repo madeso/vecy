@@ -1,0 +1,6 @@
+{
+  "name": "vecy",
+  "dependencies": [
+    "wxWidgets"
+  ]
+}
