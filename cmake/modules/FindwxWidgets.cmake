@@ -172,12 +172,12 @@ If wxWidgets is required (i.e., not an optional part):
 # Helper macro to control the debugging output globally. There are
 # two versions for controlling how verbose your output should be.
 macro(DBG_MSG _MSG)
-  message(STATUS
-    "${CMAKE_CURRENT_LIST_FILE}(${CMAKE_CURRENT_LIST_LINE}): ${_MSG}")
+#  message(STATUS
+#    "${CMAKE_CURRENT_LIST_FILE}(${CMAKE_CURRENT_LIST_LINE}): ${_MSG}")
 endmacro()
 macro(DBG_MSG_V _MSG)
-  message(STATUS
-    "${CMAKE_CURRENT_LIST_FILE}(${CMAKE_CURRENT_LIST_LINE}): ${_MSG}")
+#  message(STATUS
+#    "${CMAKE_CURRENT_LIST_FILE}(${CMAKE_CURRENT_LIST_LINE}): ${_MSG}")
 endmacro()
 
 # Clear return values in case the module is loaded more than once.
@@ -504,12 +504,9 @@ if(wxWidgets_FIND_STYLE STREQUAL "win32")
   if(NOT WX_ROOT_DIR STREQUAL wxWidgets_ROOT_DIR)
     set(WX_ROOT_DIR ${wxWidgets_ROOT_DIR}
         CACHE INTERNAL "wxWidgets_ROOT_DIR")
-    message(STATUS "clearing lib dir bc <${WX_ROOT_DIR}> differs from <${wxWidgets_ROOT_DIR}>")
     set(wxWidgets_LIB_DIR "wxWidgets_LIB_DIR-NOTFOUND"
         CACHE PATH "Cleared." FORCE)
   endif()
-
-  message(STATUS "here ${wxWidgets_ROOT_DIR}")
 
   if(WX_ROOT_DIR)
     # Select one default tree inside the already determined wx tree.
@@ -556,8 +553,6 @@ if(wxWidgets_FIND_STYLE STREQUAL "win32")
         DOC "Path to wxWidgets libraries"
         NO_DEFAULT_PATH
         )
-
-        message(STATUS "also here dynamic ${wxWidgets_LIB_DIR}")
     else()
       find_path(wxWidgets_LIB_DIR
         NAMES
@@ -585,8 +580,6 @@ if(wxWidgets_FIND_STYLE STREQUAL "win32")
         DOC "Path to wxWidgets libraries"
         NO_DEFAULT_PATH
         )
-
-        message(STATUS "also here static ${wxWidgets_LIB_DIR}")
     endif()
     unset(_WX_TOOL)
     unset(_WX_TOOLVER)
@@ -598,8 +591,6 @@ if(wxWidgets_FIND_STYLE STREQUAL "win32")
       WX_CLEAR_ALL_DBG_LIBS()
       WX_CLEAR_ALL_REL_LIBS()
     endif()
-
-    message(STATUS "after if ${wxWidgets_LIB_DIR}")
 
     if(WX_LIB_DIR)
       # If building shared libs, define WXUSINGDLL to use dllimport.
