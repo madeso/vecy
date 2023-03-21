@@ -8,7 +8,7 @@
 #include <vector>
 #include <memory>
 
-
+#include "glm/vec2.hpp"
 
 
 class MyApp: public wxApp
@@ -17,24 +17,68 @@ public:
     virtual bool OnInit();
 };
 
-struct vec2i
+struct CanvasTransform
 {
-    int x = 0;
-    int y = 0;
+    // canvas view
+    glm::vec2 scroll = glm::vec2{0.0f, 0.0f};
+    float scale = 1.0f;
 
-    vec2i operator-() const
+    // "config"
+    float scale_range_min = 0.1f;
+    float scale_range_max = 15.0f;
+
+    void zoom(const glm::vec2& mouse, float zoom)
     {
-        return { -x, -y };
+        // todo(Gustav): change to use screen_to_world
+        const auto focus = from_screen_to_world(mouse);
+
+        const float scale_factor = 1 + 0.01f * abs(zoom);
+
+        if (zoom < 0.0f)
+        {
+            scale /= scale_factor;
+        }
+
+        if (zoom > 0.0f)
+        {
+            scale *= scale_factor;
+        }
+
+        scale = std::min(std::max(scale_range_min, scale), scale_range_max);
+
+        const auto new_focus = from_screen_to_world(mouse);
+        scroll = scroll + (focus - new_focus);
+    }
+
+    [[nodiscard]] glm::vec2 from_screen_to_world(const glm::vec2& p) const
+    {
+        return scroll + p * scale;
+    }
+
+    [[nodiscard]] glm::vec2 from_world_to_screen(const glm::vec2& p) const
+    {
+        return (p - scroll) / scale;
     }
 };
-
 
 struct Shape
 {
     virtual ~Shape() = default;
 
-    virtual void paint(wxDC* dc, const vec2i& transform) = 0;
+    virtual void paint(wxDC* dc, const CanvasTransform& transform) = 0;
 };
+
+void draw_rectangle(wxDC* dc, const CanvasTransform& t, int xx, int yy, int ww, int hh)
+{
+    const glm::ivec2 p = t.from_world_to_screen(glm::ivec2{ xx, yy });
+    const glm::ivec2 r = t.from_world_to_screen(glm::ivec2{ xx+ww, yy+hh });
+    const auto w = r.x - p.x;
+    const auto h = r.y - p.y;
+    if (w > 0 && h > 0)
+    {
+        dc->DrawRectangle(wxRect(p.x, p.y, w, h));
+    }
+}
 
 struct RectangleShape : Shape
 {
@@ -51,32 +95,13 @@ struct RectangleShape : Shape
     {
     }
 
-    void paint(wxDC* dc, const vec2i& t) override
+    void paint(wxDC* dc, const CanvasTransform& t) override
     {
         wxBrush brush(color, wxBRUSHSTYLE_SOLID);
         dc->SetBrush(brush);
-        dc->DrawRectangle(wxRect(x+t.x, y+t.y, w, h));
+        draw_rectangle(dc, t, x, y, w, h);
     }
 };
-
-
-vec2i operator-(const vec2i& lhs, const vec2i& rhs)
-{
-    return
-    {
-        lhs.x - rhs.x,
-        lhs.y - rhs.y
-    };
-}
-
-vec2i operator+(const vec2i& lhs, const vec2i& rhs)
-{
-    return
-    {
-        lhs.x + rhs.x,
-        lhs.y + rhs.y
-    };
-}
 
 class CanvasWidget : public wxControl
 {
@@ -93,11 +118,19 @@ public:
     void paint_now();
     void render(wxDC& dc);
 
-    vec2i pan;
+    CanvasTransform transform;
 
-    vec2i mouse0;
-    vec2i mouse_movement;
+    glm::ivec2 mouse0 = { 0,0 };
+    glm::vec2 mouse_movement = { 0,0 };
     bool mm_down = false;
+
+    glm::ivec2 get_position(wxMouseEvent& e)
+    {
+        wxCoord width = 0;
+        wxCoord height = 0;
+        GetClientSize(&width, &height);
+        return { e.GetX(), e.GetY() };
+    }
 
     void mouseMoved(wxMouseEvent& event);
     void mouseDown(wxMouseEvent& event);
@@ -130,15 +163,13 @@ BEGIN_EVENT_TABLE(CanvasWidget, wxControl)
     EVT_MOUSEWHEEL(CanvasWidget::mouseWheelMoved)
 END_EVENT_TABLE()
 
-vec2i get_position(wxMouseEvent& e) { return { e.GetX(), e.GetY() }; }
-
 void CanvasWidget::mouseMoved(wxMouseEvent& e)
 {
     const auto m = get_position(e);
 
     if (mm_down)
     {
-        const auto delta = mouse0 - m;
+        const auto delta = transform.from_screen_to_world(mouse0) - transform.from_screen_to_world(m);
         mouse_movement = delta;
     }
 
@@ -154,14 +185,22 @@ void CanvasWidget::mouseDown(wxMouseEvent& e)
         paint_now();
     }
 }
-void CanvasWidget::mouseWheelMoved(wxMouseEvent&) {}
+
+void CanvasWidget::mouseWheelMoved(wxMouseEvent& e)
+{
+    const auto p = get_position(e);
+    transform.zoom(p, (e.GetWheelRotation() * e.GetWheelDelta()) / -240.f);
+    paint_now();
+}
+
 void CanvasWidget::mouseReleased(wxMouseEvent& e)
 {
     if (e.GetButton() == wxMOUSE_BTN_MIDDLE)
     {
         mm_down = false;
-        pan = pan + mouse_movement;
+        transform.scroll += mouse_movement;
         mouse_movement = { 0,0 };
+        paint_now();
     }
 }
 void CanvasWidget::mouseLeftWindow(wxMouseEvent&) {}
@@ -182,19 +221,21 @@ void CanvasWidget::OnPaint(wxPaintEvent&)
 
 void CanvasWidget::render(wxDC& dc)
 {
-    // wxCoord width = 0;
-    // wxCoord height = 0;
-	// GetClientSize(&width, &height);
-
     dc.SetBackground(*wxBLACK_BRUSH);
     dc.Clear();
 
-    const auto transform = -(pan + mouse_movement);
+    auto trans = transform;
+    trans.scroll += mouse_movement;
 
     for (auto& shape : shapes)
     {
-        shape->paint(&dc, transform);
+        shape->paint(&dc, trans);
     }
+
+    dc.SetTextForeground(*wxWHITE);
+
+    const auto str = wxString::Format("scale: %f", transform.scale);
+    dc.DrawText(str, 0, 0);
 }
 
 class MyFrame: public wxFrame
