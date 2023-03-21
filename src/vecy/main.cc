@@ -115,8 +115,9 @@ struct RectangleShape : Shape
 
     void paint(wxDC* dc, const CanvasTransform& t) override
     {
-        wxBrush brush(color, wxBRUSHSTYLE_SOLID);
+        wxBrush brush{ color, wxBRUSHSTYLE_SOLID };
         dc->SetBrush(brush);
+        dc->SetPen(*wxTRANSPARENT_PEN);
         draw_rectangle(dc, t, x, y, w, h);
     }
 };
