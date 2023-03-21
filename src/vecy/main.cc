@@ -17,6 +17,11 @@ public:
     virtual bool OnInit();
 };
 
+glm::vec2 from_to(const glm::vec2& f, const glm::vec2& t)
+{
+    return t - f;
+}
+
 struct CanvasTransform
 {
     // canvas view
@@ -46,18 +51,18 @@ struct CanvasTransform
 
         scale = std::min(std::max(scale_range_min, scale), scale_range_max);
 
-        const auto new_focus = from_screen_to_world(mouse);
-        scroll = scroll + (focus - new_focus);
+        const auto new_focus = from_world_to_screen(focus);
+        scroll = scroll + from_to(new_focus, mouse);
     }
 
     [[nodiscard]] glm::vec2 from_screen_to_world(const glm::vec2& p) const
     {
-        return scroll + p * scale;
+        return (p - scroll) / scale;
     }
 
     [[nodiscard]] glm::vec2 from_world_to_screen(const glm::vec2& p) const
     {
-        return (p - scroll) / scale;
+        return scroll + p * scale;
     }
 };
 
@@ -78,6 +83,19 @@ void draw_rectangle(wxDC* dc, const CanvasTransform& t, int xx, int yy, int ww, 
     {
         dc->DrawRectangle(wxRect(p.x, p.y, w, h));
     }
+}
+
+void draw_line
+(
+    wxDC* dc,
+    const glm::vec2& from,
+    const glm::vec2& to,
+    const wxColor& color
+)
+{
+    wxPen pen{ color };
+    dc->SetPen(pen);
+    dc->DrawLine({ static_cast<int>(from.x), static_cast<int>(from.y) }, { static_cast<int>(to.x), static_cast<int>(to.y) });
 }
 
 struct RectangleShape : Shape
@@ -110,7 +128,7 @@ public:
 		: wxControl(parent, id, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE)
     {
         shapes.emplace_back(std::make_shared<RectangleShape>(*wxRED, 10, 10, 10, 10));
-        shapes.emplace_back(std::make_shared<RectangleShape>(*wxBLUE, 20, 10, 10, 30));
+        shapes.emplace_back(std::make_shared<RectangleShape>(*wxBLUE, 25, 10, 10, 30));
 	}
 
 	void OnPaint(wxPaintEvent& event);
@@ -126,9 +144,6 @@ public:
 
     glm::ivec2 get_position(wxMouseEvent& e)
     {
-        wxCoord width = 0;
-        wxCoord height = 0;
-        GetClientSize(&width, &height);
         return { e.GetX(), e.GetY() };
     }
 
@@ -169,7 +184,7 @@ void CanvasWidget::mouseMoved(wxMouseEvent& e)
 
     if (mm_down)
     {
-        const auto delta = transform.from_screen_to_world(mouse0) - transform.from_screen_to_world(m);
+        const auto delta = m - mouse0;
         mouse_movement = delta;
     }
 
@@ -189,7 +204,7 @@ void CanvasWidget::mouseDown(wxMouseEvent& e)
 void CanvasWidget::mouseWheelMoved(wxMouseEvent& e)
 {
     const auto p = get_position(e);
-    transform.zoom(p, (e.GetWheelRotation() * e.GetWheelDelta()) / -240.f);
+    transform.zoom(p, (e.GetWheelRotation() * e.GetWheelDelta()) / 240.f);
     paint_now();
 }
 
@@ -226,6 +241,42 @@ void CanvasWidget::render(wxDC& dc)
 
     auto trans = transform;
     trans.scroll += mouse_movement;
+
+    // draw grid
+    const float grid_size = 25.0f;
+    {
+        wxCoord width = 0;
+        wxCoord height = 0;
+        GetClientSize(&width, &height);
+
+        const auto size = glm::ivec2{ width, height };
+
+        const float scaled_grid_size = grid_size * trans.scale;
+
+        const wxColor grid_color = *wxGREEN;
+
+        for (float x = fmodf(trans.scroll.x, scaled_grid_size); x < size.x; x += scaled_grid_size)
+        {
+            draw_line
+            (
+                &dc,
+                glm::vec2(x, 0.0f),
+                glm::vec2(x, size.y),
+                grid_color
+            );
+        }
+
+        for (float y = fmodf(trans.scroll.y, scaled_grid_size); y < size.y; y += scaled_grid_size)
+        {
+            draw_line
+            (
+                &dc, 
+                glm::vec2(0.0f, y),
+                glm::vec2(size.x, y),
+                grid_color
+            );
+        }
+    }
 
     for (auto& shape : shapes)
     {
