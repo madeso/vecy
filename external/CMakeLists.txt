@@ -1,3 +1,15 @@
+###################################################################################################
+# glm
+add_library(external_glm INTERFACE)
+target_include_directories(external_glm SYSTEM
+    INTERFACE
+        glm
+)
+add_library(external::glm ALIAS external_glm)
+
+
+###################################################################################################
+# wxWdigets
 set(wxWidgets_USE_STATIC ON)
 SET(WX_COMPONENTS core aui base stc adv html)
 SET(WX_COMPONENTS core base)
