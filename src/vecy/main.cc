@@ -128,6 +128,7 @@ public:
 	CanvasWidget(wxWindow* parent, wxWindowID id)
 		: wxControl(parent, id, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE)
     {
+        SetDoubleBuffered(true);
         shapes.emplace_back(std::make_shared<RectangleShape>(*wxRED, 10, 10, 10, 10));
         shapes.emplace_back(std::make_shared<RectangleShape>(*wxBLUE, 25, 10, 10, 30));
 	}
@@ -156,6 +157,8 @@ public:
     void keyPressed(wxKeyEvent& event);
     void keyReleased(wxKeyEvent& event);
 
+    void on_erase_background(wxEraseEvent&) {}
+
 	DECLARE_EVENT_TABLE();
 
     std::vector<std::shared_ptr<Shape>> shapes;
@@ -177,6 +180,8 @@ BEGIN_EVENT_TABLE(CanvasWidget, wxControl)
     EVT_KEY_DOWN(CanvasWidget::keyPressed)
     EVT_KEY_UP(CanvasWidget::keyReleased)
     EVT_MOUSEWHEEL(CanvasWidget::mouseWheelMoved)
+
+    EVT_ERASE_BACKGROUND(CanvasWidget::on_erase_background)
 END_EVENT_TABLE()
 
 void CanvasWidget::mouseMoved(wxMouseEvent& e)
