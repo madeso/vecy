@@ -132,6 +132,7 @@ struct Settings
     Rgb background_color = open_color::gray_9;
     Rgb grid_color = open_color::green_9;
     Rgb handle_color = open_color::violet_9;
+    Rgb selection_color = open_color::blue_9;
 
     float handle_radius = 5.0f;
 };
@@ -170,6 +171,29 @@ struct Rect
              || p.y < topleft.y
             ;
         return !outside;
+    }
+
+    void include(const glm::vec2& p)
+    {
+        if (p.x < topleft.x)
+        {
+            size.x += topleft.x - p.x;
+            topleft.x = p.x;
+        }
+        else if (p.x > topleft.x + size.x)
+        {
+            size.x = p.x - topleft.x;
+        }
+
+        if (p.y < topleft.y)
+        {
+            size.y += topleft.y - p.y;
+            topleft.y = p.y;
+        }
+        else if (p.y > topleft.y + size.y)
+        {
+            size.y = p.y - topleft.y;
+        }
     }
 };
 
@@ -217,12 +241,23 @@ wxPen to_wx(std::optional<Outline> o)
     }
 }
 
-void draw_rectangle(wxDC* dc, const Rect& r, const Rgb& color, std::optional<Outline> outline)
+wxBrush to_wx_brush(std::optional<Rgb> o)
+{
+    if (o)
+    {
+        return wxBrush{ o->to_wx(), wxBRUSHSTYLE_SOLID};
+    }
+    else
+    {
+        return *wxTRANSPARENT_BRUSH;
+    }
+}
+
+void draw_rectangle(wxDC* dc, const Rect& r, std::optional<Rgb> color, std::optional<Outline> outline)
 {
     if (r.size.x > 0 && r.size.y > 0)
     {
-        wxBrush brush{ color.to_wx(), wxBRUSHSTYLE_SOLID };
-        dc->SetBrush(brush);
+        dc->SetBrush(to_wx_brush(color));
         dc->SetPen(to_wx(outline));
         dc->DrawRectangle(wxRect(r.topleft.x, r.topleft.y, r.size.x, r.size.y));
     }
@@ -282,6 +317,11 @@ struct RectangleShape : Shape
     }
 };
 
+enum class MouseState
+{
+    none, left, middle, right
+};
+
 class CanvasWidget : public wxControl
 {
 public:
@@ -307,8 +347,10 @@ public:
     CanvasTransform transform;
 
     glm::ivec2 mouse0 = { 0,0 };
+    glm::ivec2 latest_mouse = { 0,0 };
     glm::vec2 mouse_movement = { 0,0 };
-    bool mm_down = false;
+    
+    MouseState mouse = MouseState::none;
 
     CanvasTransform get_current_transform() const
     {
@@ -377,13 +419,18 @@ void CanvasWidget::mouseMoved(wxMouseEvent& e)
 {
     const auto m = get_position(e);
 
-    if (mm_down)
+    switch (mouse)
     {
-        mouse_movement = m - mouse0;
-    }
-    else
-    {
+    case MouseState::none:
         hovers = get_hit(get_current_transform(), m, 10.0f);
+        break;
+    case MouseState::middle:
+        mouse_movement = m - mouse0;
+        latest_mouse = m;
+        break;
+    case MouseState::left:
+        latest_mouse = m;
+        break;
     }
 
     paint_now();
@@ -391,10 +438,24 @@ void CanvasWidget::mouseMoved(wxMouseEvent& e)
 
 void CanvasWidget::mouseDown(wxMouseEvent& e)
 {
-    if (e.GetButton() == wxMOUSE_BTN_MIDDLE)
+    if (mouse != MouseState::none)
     {
-        mouse0 = get_position(e);
-        mm_down = true;
+        return;
+    }
+
+    const auto m = get_position(e);
+
+    if (e.GetButton() == wxMOUSE_BTN_LEFT)
+    {
+        mouse = MouseState::left;
+        mouse0 = m;
+        latest_mouse = m;
+        paint_now();
+    }
+    else if (e.GetButton() == wxMOUSE_BTN_MIDDLE)
+    {
+        mouse = MouseState::middle;
+        mouse0 = m;
         paint_now();
     }
 }
@@ -408,12 +469,20 @@ void CanvasWidget::mouseWheelMoved(wxMouseEvent& e)
 
 void CanvasWidget::mouseReleased(wxMouseEvent& e)
 {
-    if (e.GetButton() == wxMOUSE_BTN_MIDDLE)
+    switch(mouse)
     {
-        mm_down = false;
+    case MouseState::left:
+        if (e.GetButton() != wxMOUSE_BTN_LEFT) { return; }
+        mouse = MouseState::none;
+        paint_now();
+        break;
+    case MouseState::middle:
+        if (e.GetButton() != wxMOUSE_BTN_MIDDLE) { return; }
+        mouse = MouseState::none;
         transform.scroll += mouse_movement;
         mouse_movement = { 0,0 };
         paint_now();
+        break;
     }
 }
 void CanvasWidget::mouseLeftWindow(wxMouseEvent&) {}
@@ -482,6 +551,14 @@ void CanvasWidget::render(wxDC& dc)
     {
         const auto is_hovering = hovers.find(shape.first) != hovers.end();
         shape.second->paint(&dc, trans, settings, is_hovering);
+    }
+
+    // draw selection box
+    if (mouse == MouseState::left)
+    {
+        auto r = Rect{ mouse0, {0, 0} };
+        r.include(latest_mouse);
+        draw_rectangle(&dc, r, std::nullopt, Outline{ settings.selection_color, 1, LineStyle::long_dash });
     }
 
     dc.SetTextForeground(*wxWHITE);
