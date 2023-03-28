@@ -9,6 +9,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <optional>
 
 #include "open-color.h"
 
@@ -179,22 +180,59 @@ Rect from_world_to_screen(const CanvasTransform& t, const Rect& r)
     return {p, s - p};
 }
 
-void draw_rectangle(wxDC* dc, const Rect& r, const Rgb& color)
+enum class LineStyle
+    { solid, dot, long_dash, short_dash, dot_dash };
+
+wxPenStyle to_wx(LineStyle style)
+{
+    switch (style)
+    {
+        case LineStyle::solid: return wxPENSTYLE_SOLID;
+        case LineStyle::dot: return wxPENSTYLE_DOT;
+        case LineStyle::long_dash: return wxPENSTYLE_LONG_DASH;
+        case LineStyle::short_dash: return wxPENSTYLE_SHORT_DASH;
+        case LineStyle::dot_dash: return wxPENSTYLE_DOT_DASH;
+        default:
+            assert(false);
+            return wxPENSTYLE_SOLID;
+    }
+}
+
+struct Outline
+{
+    Rgb color;
+    int width;
+    LineStyle style;
+};
+
+wxPen to_wx(std::optional<Outline> o)
+{
+    if (o)
+    {
+        return wxPen{o->color.to_wx(), o->width, to_wx(o->style)};
+    }
+    else
+    {
+        return *wxTRANSPARENT_PEN;
+    }
+}
+
+void draw_rectangle(wxDC* dc, const Rect& r, const Rgb& color, std::optional<Outline> outline)
 {
     if (r.size.x > 0 && r.size.y > 0)
     {
         wxBrush brush{ color.to_wx(), wxBRUSHSTYLE_SOLID };
         dc->SetBrush(brush);
-        dc->SetPen(*wxTRANSPARENT_PEN);
+        dc->SetPen(to_wx(outline));
         dc->DrawRectangle(wxRect(r.topleft.x, r.topleft.y, r.size.x, r.size.y));
     }
 }
 
-void draw_circle(wxDC* dc, const glm::vec2& p, float radius, Rgb color)
+void draw_circle(wxDC* dc, const glm::vec2& p, float radius, Rgb color, std::optional<Outline> outline)
 {
     wxBrush brush{ color.to_wx(), wxBRUSHSTYLE_SOLID };
     dc->SetBrush(brush);
-    dc->SetPen(*wxTRANSPARENT_PEN);
+    dc->SetPen(to_wx(outline));
     dc->DrawCircle(static_cast<wxCoord>(p.x), static_cast<wxCoord>(p.y), static_cast<wxCoord>(radius));
 }
 
@@ -225,16 +263,16 @@ struct RectangleShape : Shape
 
     void paint(wxDC* dc, const CanvasTransform& t, const Settings& settings, bool state) override
     {
-        draw_rectangle(dc, from_world_to_screen(t, rect), color);
+        draw_rectangle(dc, from_world_to_screen(t, rect), color, std::nullopt);
 
         if (state)
         {
             const auto dx = glm::vec2{ rect.size.x, 0 };
             const auto dy = glm::vec2{ 0, rect.size.y };
-            draw_circle(dc, t.from_world_to_screen(rect.topleft), settings.handle_radius, settings.handle_color);
-            draw_circle(dc, t.from_world_to_screen(rect.topleft + dx), settings.handle_radius, settings.handle_color);
-            draw_circle(dc, t.from_world_to_screen(rect.topleft + dy), settings.handle_radius, settings.handle_color);
-            draw_circle(dc, t.from_world_to_screen(rect.topleft + dx + dy), settings.handle_radius, settings.handle_color);
+            draw_circle(dc, t.from_world_to_screen(rect.topleft), settings.handle_radius, settings.handle_color, std::nullopt);
+            draw_circle(dc, t.from_world_to_screen(rect.topleft + dx), settings.handle_radius, settings.handle_color, std::nullopt);
+            draw_circle(dc, t.from_world_to_screen(rect.topleft + dy), settings.handle_radius, settings.handle_color, std::nullopt);
+            draw_circle(dc, t.from_world_to_screen(rect.topleft + dx + dy), settings.handle_radius, settings.handle_color, std::nullopt);
         }
     }
 
