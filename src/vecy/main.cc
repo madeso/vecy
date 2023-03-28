@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <memory>
+#include <unordered_map>
 
 #include "glm/vec2.hpp"
 
@@ -17,18 +18,37 @@ public:
     virtual bool OnInit();
 };
 
+using u64 = std::uint64_t;
+
 struct Id
 {
-    std::uint64_t id;
+    u64 id;
+
+    bool operator==(const Id& rhs) const
+    {
+        return id == rhs.id;
+    }
 };
+
+namespace std
+{
+	template<>
+	struct hash<Id>
+	{
+		std::size_t operator()(const Id& k) const
+		{
+            return hash<u64>{}(k.id);
+		}
+	};
+}
 
 struct IdGenerator
 {
-    std::uint64_t next = 0;
+    u64 next = 0;
 
     Id create()
     {
-        const auto value = next;
+        const u64 value = next;
         next += 1;
         return { value };
     }
@@ -150,9 +170,14 @@ public:
     {
         SetDoubleBuffered(true);
 
-        shapes.emplace_back(std::make_shared<RectangleShape>(ids.create(), *wxRED, 10, 10, 10, 10));
-        shapes.emplace_back(std::make_shared<RectangleShape>(ids.create(), *wxBLUE, 25, 10, 10, 30));
+        add(std::make_shared<RectangleShape>(ids.create(), *wxRED, 10, 10, 10, 10));
+        add(std::make_shared<RectangleShape>(ids.create(), *wxBLUE, 25, 10, 10, 30));
 	}
+
+    void add(std::shared_ptr<Shape> s)
+    {
+        shapes[s->id] = s;
+    }
 
 	void OnPaint(wxPaintEvent& event);
 
@@ -183,7 +208,7 @@ public:
 	DECLARE_EVENT_TABLE();
 
     IdGenerator ids;
-    std::vector<std::shared_ptr<Shape>> shapes;
+    std::unordered_map<Id, std::shared_ptr<Shape>> shapes;
 };
 
 BEGIN_EVENT_TABLE(CanvasWidget, wxControl)
@@ -308,7 +333,7 @@ void CanvasWidget::render(wxDC& dc)
 
     for (auto& shape : shapes)
     {
-        shape->paint(&dc, trans);
+        shape.second->paint(&dc, trans);
     }
 
     dc.SetTextForeground(*wxWHITE);
