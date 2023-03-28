@@ -17,6 +17,23 @@ public:
     virtual bool OnInit();
 };
 
+struct Id
+{
+    std::uint64_t id;
+};
+
+struct IdGenerator
+{
+    std::uint64_t next = 0;
+
+    Id create()
+    {
+        const auto value = next;
+        next += 1;
+        return { value };
+    }
+};
+
 glm::vec2 from_to(const glm::vec2& f, const glm::vec2& t)
 {
     return t - f;
@@ -68,6 +85,8 @@ struct CanvasTransform
 
 struct Shape
 {
+    Id id;
+    explicit Shape(Id i) : id(std::move(i)) {}
     virtual ~Shape() = default;
 
     virtual void paint(wxDC* dc, const CanvasTransform& transform) = 0;
@@ -104,8 +123,9 @@ struct RectangleShape : Shape
     int x = 0; int y = 0;
     int w = 0; int h = 0;
 
-    RectangleShape(wxColor cc, int xx, int yy, int ww, int hh)
-        : color(cc)
+    RectangleShape(Id i, wxColor cc, int xx, int yy, int ww, int hh)
+        : Shape(std::move(i))
+        , color(cc)
         , x(xx)
         , y(yy)
         , w(ww)
@@ -129,8 +149,9 @@ public:
 		: wxControl(parent, id, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE)
     {
         SetDoubleBuffered(true);
-        shapes.emplace_back(std::make_shared<RectangleShape>(*wxRED, 10, 10, 10, 10));
-        shapes.emplace_back(std::make_shared<RectangleShape>(*wxBLUE, 25, 10, 10, 30));
+
+        shapes.emplace_back(std::make_shared<RectangleShape>(ids.create(), *wxRED, 10, 10, 10, 10));
+        shapes.emplace_back(std::make_shared<RectangleShape>(ids.create(), *wxBLUE, 25, 10, 10, 30));
 	}
 
 	void OnPaint(wxPaintEvent& event);
@@ -161,6 +182,7 @@ public:
 
 	DECLARE_EVENT_TABLE();
 
+    IdGenerator ids;
     std::vector<std::shared_ptr<Shape>> shapes;
 };
 
