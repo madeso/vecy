@@ -21,3 +21,14 @@ add_library(external_wx INTERFACE)
 target_include_directories(external_wx INTERFACE ${wxWidgets_INCLUDE_DIRS})
 target_link_libraries(external_wx INTERFACE ${wxWidgets_LIBRARIES})
 add_library(external::wx ALIAS external_wx)
+
+
+###################################################################################################
+# open color
+add_library(open_color INTERFACE)
+target_include_directories(open_color
+    INTERFACE
+        SYSTEM open-color/include
+)
+add_library(external::open_color ALIAS open_color)
+

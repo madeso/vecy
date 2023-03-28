@@ -8,6 +8,9 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
+
+#include "open-color.h"
 
 #include "glm/vec2.hpp"
 
@@ -18,6 +21,7 @@ public:
     virtual bool OnInit();
 };
 
+using u8 = std::uint8_t;
 using u64 = std::uint64_t;
 
 struct Id
@@ -51,6 +55,25 @@ struct IdGenerator
         const u64 value = next;
         next += 1;
         return { value };
+    }
+};
+
+struct Rgb
+{
+    u8 r;
+    u8 g;
+    u8 b;
+
+    Rgb(open_color::Hex h)
+        : r((h >> 16) & 0xFF)
+        , g((h >> 8) & 0xFF)
+        , b((h) & 0xFF)
+    {
+    }
+
+    wxColor to_wx() const
+    {
+        return wxColor{ r, g, b };
     }
 };
 
@@ -103,25 +126,76 @@ struct CanvasTransform
     }
 };
 
+struct Settings
+{
+    Rgb background_color = open_color::gray_9;
+    Rgb grid_color = open_color::green_9;
+    Rgb handle_color = open_color::violet_9;
+
+    float handle_radius = 5.0f;
+};
+
 struct Shape
 {
     Id id;
     explicit Shape(Id i) : id(std::move(i)) {}
     virtual ~Shape() = default;
 
-    virtual void paint(wxDC* dc, const CanvasTransform& transform) = 0;
+    virtual void paint(wxDC* dc, const CanvasTransform& transform, const Settings& settings, bool state) = 0;
+
+    virtual bool is_hit(const CanvasTransform& t, const glm::vec2& p, float extra) = 0;
 };
 
-void draw_rectangle(wxDC* dc, const CanvasTransform& t, int xx, int yy, int ww, int hh)
+struct Rect
 {
-    const glm::ivec2 p = t.from_world_to_screen(glm::ivec2{ xx, yy });
-    const glm::ivec2 r = t.from_world_to_screen(glm::ivec2{ xx+ww, yy+hh });
-    const auto w = r.x - p.x;
-    const auto h = r.y - p.y;
-    if (w > 0 && h > 0)
+    glm::vec2 topleft;
+    glm::vec2 size;
+
+    Rect extend(float x) const
     {
-        dc->DrawRectangle(wxRect(p.x, p.y, w, h));
+        return
+        {
+            {topleft.x - x, topleft.y - x},
+            {size.x + x * 2.0f, size.y + x * 2.0f}
+        };
     }
+
+    bool contains(const glm::vec2& p) const
+    {
+        const bool outside
+            = p.x < topleft.x
+             || p.x > topleft.x + size.x
+             || p.y > topleft.y + size.y
+             || p.y < topleft.y
+            ;
+        return !outside;
+    }
+};
+
+Rect from_world_to_screen(const CanvasTransform& t, const Rect& r)
+{
+    const glm::vec2 p = t.from_world_to_screen(r.topleft);
+    const glm::vec2 s = t.from_world_to_screen(r.topleft + r.size);
+    return {p, s - p};
+}
+
+void draw_rectangle(wxDC* dc, const Rect& r, const Rgb& color)
+{
+    if (r.size.x > 0 && r.size.y > 0)
+    {
+        wxBrush brush{ color.to_wx(), wxBRUSHSTYLE_SOLID };
+        dc->SetBrush(brush);
+        dc->SetPen(*wxTRANSPARENT_PEN);
+        dc->DrawRectangle(wxRect(r.topleft.x, r.topleft.y, r.size.x, r.size.y));
+    }
+}
+
+void draw_circle(wxDC* dc, const glm::vec2& p, float radius, Rgb color)
+{
+    wxBrush brush{ color.to_wx(), wxBRUSHSTYLE_SOLID };
+    dc->SetBrush(brush);
+    dc->SetPen(*wxTRANSPARENT_PEN);
+    dc->DrawCircle(static_cast<wxCoord>(p.x), static_cast<wxCoord>(p.y), static_cast<wxCoord>(radius));
 }
 
 void draw_line
@@ -139,39 +213,47 @@ void draw_line
 
 struct RectangleShape : Shape
 {
-    wxColor color;
-    int x = 0; int y = 0;
-    int w = 0; int h = 0;
+    Rgb color;
+    Rect rect;
 
-    RectangleShape(Id i, wxColor cc, int xx, int yy, int ww, int hh)
+    RectangleShape(Id i, Rgb cc, Rect r)
         : Shape(std::move(i))
-        , color(cc)
-        , x(xx)
-        , y(yy)
-        , w(ww)
-        , h(hh)
+        , color(std::move(cc))
+        , rect(std::move(r))
     {
     }
 
-    void paint(wxDC* dc, const CanvasTransform& t) override
+    void paint(wxDC* dc, const CanvasTransform& t, const Settings& settings, bool state) override
     {
-        wxBrush brush{ color, wxBRUSHSTYLE_SOLID };
-        dc->SetBrush(brush);
-        dc->SetPen(*wxTRANSPARENT_PEN);
-        draw_rectangle(dc, t, x, y, w, h);
+        draw_rectangle(dc, from_world_to_screen(t, rect), color);
+
+        if (state)
+        {
+            const auto dx = glm::vec2{ rect.size.x, 0 };
+            const auto dy = glm::vec2{ 0, rect.size.y };
+            draw_circle(dc, t.from_world_to_screen(rect.topleft), settings.handle_radius, settings.handle_color);
+            draw_circle(dc, t.from_world_to_screen(rect.topleft + dx), settings.handle_radius, settings.handle_color);
+            draw_circle(dc, t.from_world_to_screen(rect.topleft + dy), settings.handle_radius, settings.handle_color);
+            draw_circle(dc, t.from_world_to_screen(rect.topleft + dx + dy), settings.handle_radius, settings.handle_color);
+        }
+    }
+
+    bool is_hit(const CanvasTransform& t, const glm::vec2& p, float extra) override
+    {
+        return from_world_to_screen(t, rect).extend(extra).contains(p);
     }
 };
 
 class CanvasWidget : public wxControl
 {
 public:
-	CanvasWidget(wxWindow* parent, wxWindowID id)
+    CanvasWidget(wxWindow* parent, wxWindowID id)
 		: wxControl(parent, id, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE)
     {
         SetDoubleBuffered(true);
 
-        add(std::make_shared<RectangleShape>(ids.create(), *wxRED, 10, 10, 10, 10));
-        add(std::make_shared<RectangleShape>(ids.create(), *wxBLUE, 25, 10, 10, 30));
+        add(std::make_shared<RectangleShape>(ids.create(), open_color::red_5 , Rect{{10, 10}, {10, 10}}));
+        add(std::make_shared<RectangleShape>(ids.create(), open_color::blue_5, Rect{{25, 10}, {10, 30}}));
 	}
 
     void add(std::shared_ptr<Shape> s)
@@ -190,9 +272,29 @@ public:
     glm::vec2 mouse_movement = { 0,0 };
     bool mm_down = false;
 
+    CanvasTransform get_current_transform() const
+    {
+        auto trans = transform;
+        trans.scroll += mouse_movement;
+        return trans;
+    }
+
     glm::ivec2 get_position(wxMouseEvent& e)
     {
         return { e.GetX(), e.GetY() };
+    }
+
+    std::unordered_set<Id> get_hit(const CanvasTransform& t, const glm::vec2& p, float x)
+    {
+        std::unordered_set<Id> ret;
+        for (auto& shape : shapes)
+        {
+            if (shape.second->is_hit(t, p, x))
+            {
+                ret.insert(shape.first);
+            }
+        }
+        return ret;
     }
 
     void mouseMoved(wxMouseEvent& event);
@@ -207,7 +309,9 @@ public:
 
 	DECLARE_EVENT_TABLE();
 
+    Settings settings;
     IdGenerator ids;
+    std::unordered_set<Id> hovers;
     std::unordered_map<Id, std::shared_ptr<Shape>> shapes;
 };
 
@@ -237,8 +341,11 @@ void CanvasWidget::mouseMoved(wxMouseEvent& e)
 
     if (mm_down)
     {
-        const auto delta = m - mouse0;
-        mouse_movement = delta;
+        mouse_movement = m - mouse0;
+    }
+    else
+    {
+        hovers = get_hit(get_current_transform(), m, 10.0f);
     }
 
     paint_now();
@@ -289,11 +396,13 @@ void CanvasWidget::OnPaint(wxPaintEvent&)
 
 void CanvasWidget::render(wxDC& dc)
 {
-    dc.SetBackground(*wxBLACK_BRUSH);
-    dc.Clear();
+    {
+        wxBrush brush{ settings.background_color.to_wx(), wxBRUSHSTYLE_SOLID };
+        dc.SetBackground(brush);
+        dc.Clear();
+    }
 
-    auto trans = transform;
-    trans.scroll += mouse_movement;
+    const auto trans = get_current_transform();
 
     // draw grid
     const float grid_size = 25.0f;
@@ -306,7 +415,7 @@ void CanvasWidget::render(wxDC& dc)
 
         const float scaled_grid_size = grid_size * trans.scale;
 
-        const wxColor grid_color = *wxGREEN;
+        const wxColor grid_color = settings.grid_color.to_wx();
 
         for (float x = fmodf(trans.scroll.x, scaled_grid_size); x < size.x; x += scaled_grid_size)
         {
@@ -333,11 +442,11 @@ void CanvasWidget::render(wxDC& dc)
 
     for (auto& shape : shapes)
     {
-        shape.second->paint(&dc, trans);
+        const auto is_hovering = hovers.find(shape.first) != hovers.end();
+        shape.second->paint(&dc, trans, settings, is_hovering);
     }
 
     dc.SetTextForeground(*wxWHITE);
-
     const auto str = wxString::Format("scale: %f", transform.scale);
     dc.DrawText(str, 0, 0);
 }

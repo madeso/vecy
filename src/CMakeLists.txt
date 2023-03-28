@@ -7,4 +7,5 @@ target_link_libraries(vecy
     PUBLIC
         external::wx
         external::glm
+        external::open_color
 )
