@@ -5,6 +5,8 @@
     #include <wx/wx.h>
 #endif
 
+#include <wx/graphics.h>
+
 #include <vector>
 #include <memory>
 #include <unordered_map>
@@ -59,22 +61,24 @@ struct IdGenerator
     }
 };
 
-struct Rgb
+struct Rgba
 {
     u8 r;
     u8 g;
     u8 b;
+    u8 a;
 
-    Rgb(open_color::Hex h)
+    Rgba(open_color::Hex h, u8 aa = 255)
         : r((h >> 16) & 0xFF)
         , g((h >> 8) & 0xFF)
         , b((h) & 0xFF)
+        , a(aa)
     {
     }
 
     wxColor to_wx() const
     {
-        return wxColor{ r, g, b };
+        return wxColor{ r, g, b, a };
     }
 };
 
@@ -129,13 +133,18 @@ struct CanvasTransform
 
 struct Settings
 {
-    Rgb background_color = open_color::gray_9;
-    Rgb grid_color = open_color::green_9;
-    Rgb handle_color = open_color::violet_9;
-    Rgb selection_color = open_color::blue_9;
+    Rgba background_color = open_color::gray_9;
+    Rgba grid_color = open_color::green_9;
+    Rgba handle_color = open_color::violet_9;
+
+    Rgba selection_border = open_color::gray_3;
+    Rgba selection_positive = Rgba{ open_color::blue_9, 100 };
+    Rgba selection_negative = Rgba{ open_color::red_9, 100 };
 
     float handle_radius = 5.0f;
 };
+
+struct Painter;
 
 struct Shape
 {
@@ -143,7 +152,7 @@ struct Shape
     explicit Shape(Id i) : id(std::move(i)) {}
     virtual ~Shape() = default;
 
-    virtual void paint(wxDC* dc, const CanvasTransform& transform, const Settings& settings, bool state) = 0;
+    virtual void paint(Painter*, const CanvasTransform& transform, const Settings& settings, bool state) = 0;
 
     virtual bool is_hit(const CanvasTransform& t, const glm::vec2& p, float extra) = 0;
 };
@@ -224,7 +233,7 @@ wxPenStyle to_wx(LineStyle style)
 
 struct Outline
 {
-    Rgb color;
+    Rgba color;
     int width;
     LineStyle style;
 };
@@ -241,7 +250,7 @@ wxPen to_wx(std::optional<Outline> o)
     }
 }
 
-wxBrush to_wx_brush(std::optional<Rgb> o)
+wxBrush to_wx_brush(std::optional<Rgba> o)
 {
     if (o)
     {
@@ -253,61 +262,117 @@ wxBrush to_wx_brush(std::optional<Rgb> o)
     }
 }
 
-void draw_rectangle(wxDC* dc, const Rect& r, std::optional<Rgb> color, std::optional<Outline> outline)
+bool is_alpha(const Rgba& color)
 {
-    if (r.size.x > 0 && r.size.y > 0)
+    return color.a < 255;
+}
+
+bool is_alpha(std::optional<Rgba> color, std::optional<Outline> outline)
+{
+    if (color && is_alpha(*color)) { return true; }
+    else if (outline && is_alpha(outline->color)) { return true; }
+    else { return false; }
+}
+
+struct Painter
+{
+    wxDC* dc;
+    wxGraphicsContext* graphics;
+
+    void clear(const Rgba& color)
     {
-        dc->SetBrush(to_wx_brush(color));
-        dc->SetPen(to_wx(outline));
-        dc->DrawRectangle(wxRect(r.topleft.x, r.topleft.y, r.size.x, r.size.y));
+        wxBrush brush{ color.to_wx(), wxBRUSHSTYLE_SOLID };
+        dc->SetBackground(brush);
+        dc->Clear();
     }
-}
 
-void draw_circle(wxDC* dc, const glm::vec2& p, float radius, Rgb color, std::optional<Outline> outline)
-{
-    wxBrush brush{ color.to_wx(), wxBRUSHSTYLE_SOLID };
-    dc->SetBrush(brush);
-    dc->SetPen(to_wx(outline));
-    dc->DrawCircle(static_cast<wxCoord>(p.x), static_cast<wxCoord>(p.y), static_cast<wxCoord>(radius));
-}
+    void draw_text(const wxString& str, glm::vec2 p, Rgba color)
+    {
+        dc->SetTextForeground(color.to_wx());
+        dc->DrawText(str, p.x, p.y);
+    }
 
-void draw_line
-(
-    wxDC* dc,
-    const glm::vec2& from,
-    const glm::vec2& to,
-    const wxColor& color
-)
-{
-    wxPen pen{ color };
-    dc->SetPen(pen);
-    dc->DrawLine({ static_cast<int>(from.x), static_cast<int>(from.y) }, { static_cast<int>(to.x), static_cast<int>(to.y) });
-}
+    void draw_rectangle(const Rect& r, std::optional<Rgba> color, std::optional<Outline> outline)
+    {
+        if (r.size.x > 0 && r.size.y > 0)
+        {
+            if (is_alpha(color, outline))
+            {
+                graphics->SetBrush(to_wx_brush(color));
+                graphics->SetPen(to_wx(outline));
+                graphics->DrawRectangle(r.topleft.x, r.topleft.y, r.size.x, r.size.y);
+            }
+            else
+            {
+                dc->SetBrush(to_wx_brush(color));
+                dc->SetPen(to_wx(outline));
+                dc->DrawRectangle(wxRect(r.topleft.x, r.topleft.y, r.size.x, r.size.y));
+            }
+        }
+    }
+
+    void draw_circle(const glm::vec2& p, float radius, std::optional<Rgba> color, std::optional<Outline> outline)
+    {
+        if(is_alpha(color, outline))
+        {
+            graphics->SetBrush(to_wx_brush(color));
+            graphics->SetPen(to_wx(outline));
+            graphics->DrawEllipse(p.x - radius, p.y - radius, radius * 2, radius * 2);
+        }
+        else
+        {
+            dc->SetBrush(to_wx_brush(color));
+            dc->SetPen(to_wx(outline));
+            dc->DrawEllipse(p.x - radius, p.y - radius, radius * 2, radius * 2);
+
+            // dc->DrawCircle(static_cast<wxCoord>(p.x), static_cast<wxCoord>(p.y), static_cast<wxCoord>(radius));
+        }
+    }
+
+    void draw_line(const glm::vec2& from, const glm::vec2& to, const Outline& outline)
+    {
+        if(is_alpha(outline.color))
+        {
+            wxPoint2DDouble points[2] =
+            {
+                {from.x, from.y},
+                {to.x, to.y}
+            };
+            graphics->SetPen(to_wx(outline));
+            graphics->DrawLines(2, points);
+        }
+        else
+        {
+            dc->SetPen(to_wx(outline));
+            dc->DrawLine({ static_cast<int>(from.x), static_cast<int>(from.y) }, { static_cast<int>(to.x), static_cast<int>(to.y) });
+        }
+    }
+};
 
 struct RectangleShape : Shape
 {
-    Rgb color;
+    Rgba color;
     Rect rect;
 
-    RectangleShape(Id i, Rgb cc, Rect r)
+    RectangleShape(Id i, Rgba cc, Rect r)
         : Shape(std::move(i))
         , color(std::move(cc))
         , rect(std::move(r))
     {
     }
 
-    void paint(wxDC* dc, const CanvasTransform& t, const Settings& settings, bool state) override
+    void paint(Painter* dc, const CanvasTransform& t, const Settings& settings, bool state) override
     {
-        draw_rectangle(dc, from_world_to_screen(t, rect), color, std::nullopt);
+        dc->draw_rectangle(from_world_to_screen(t, rect), color, std::nullopt);
 
         if (state)
         {
             const auto dx = glm::vec2{ rect.size.x, 0 };
             const auto dy = glm::vec2{ 0, rect.size.y };
-            draw_circle(dc, t.from_world_to_screen(rect.topleft), settings.handle_radius, settings.handle_color, std::nullopt);
-            draw_circle(dc, t.from_world_to_screen(rect.topleft + dx), settings.handle_radius, settings.handle_color, std::nullopt);
-            draw_circle(dc, t.from_world_to_screen(rect.topleft + dy), settings.handle_radius, settings.handle_color, std::nullopt);
-            draw_circle(dc, t.from_world_to_screen(rect.topleft + dx + dy), settings.handle_radius, settings.handle_color, std::nullopt);
+            dc->draw_circle(t.from_world_to_screen(rect.topleft), settings.handle_radius, settings.handle_color, std::nullopt);
+            dc->draw_circle(t.from_world_to_screen(rect.topleft + dx), settings.handle_radius, settings.handle_color, std::nullopt);
+            dc->draw_circle(t.from_world_to_screen(rect.topleft + dy), settings.handle_radius, settings.handle_color, std::nullopt);
+            dc->draw_circle(t.from_world_to_screen(rect.topleft + dx + dy), settings.handle_radius, settings.handle_color, std::nullopt);
         }
     }
 
@@ -342,7 +407,7 @@ public:
 	void OnPaint(wxPaintEvent& event);
 
     void paint_now();
-    void render(wxDC& dc);
+    void render(Painter& painter);
 
     CanvasTransform transform;
 
@@ -492,22 +557,22 @@ void CanvasWidget::keyReleased(wxKeyEvent&) {}
 void CanvasWidget::paint_now()
 {
     wxClientDC dc(this);
-    render(dc);
+    wxGraphicsContext* gc = wxGraphicsContext::Create(dc);
+    render(Painter{&dc, gc});
+    delete gc;
 }
 
 void CanvasWidget::OnPaint(wxPaintEvent&)
 {
     wxPaintDC dc(this);
-    render(dc);
+    wxGraphicsContext* gc = wxGraphicsContext::Create(dc);
+    render(Painter{&dc, gc});
+    delete gc;
 }
 
-void CanvasWidget::render(wxDC& dc)
+void CanvasWidget::render(Painter& dc)
 {
-    {
-        wxBrush brush{ settings.background_color.to_wx(), wxBRUSHSTYLE_SOLID };
-        dc.SetBackground(brush);
-        dc.Clear();
-    }
+    dc.clear(settings.background_color);
 
     const auto trans = get_current_transform();
 
@@ -522,27 +587,25 @@ void CanvasWidget::render(wxDC& dc)
 
         const float scaled_grid_size = grid_size * trans.scale;
 
-        const wxColor grid_color = settings.grid_color.to_wx();
+        Outline grid_line = { settings.grid_color, 1, LineStyle::solid };
 
         for (float x = fmodf(trans.scroll.x, scaled_grid_size); x < size.x; x += scaled_grid_size)
         {
-            draw_line
+            dc.draw_line
             (
-                &dc,
                 glm::vec2(x, 0.0f),
                 glm::vec2(x, size.y),
-                grid_color
+                grid_line
             );
         }
 
         for (float y = fmodf(trans.scroll.y, scaled_grid_size); y < size.y; y += scaled_grid_size)
         {
-            draw_line
+            dc.draw_line
             (
-                &dc, 
                 glm::vec2(0.0f, y),
                 glm::vec2(size.x, y),
-                grid_color
+                grid_line
             );
         }
     }
@@ -558,12 +621,11 @@ void CanvasWidget::render(wxDC& dc)
     {
         auto r = Rect{ mouse0, {0, 0} };
         r.include(latest_mouse);
-        draw_rectangle(&dc, r, std::nullopt, Outline{ settings.selection_color, 1, LineStyle::long_dash });
+        dc.draw_rectangle(r, mouse0.x < latest_mouse.x ? settings.selection_positive : settings.selection_negative, Outline{ settings.selection_border, 1, LineStyle::long_dash });
     }
 
-    dc.SetTextForeground(*wxWHITE);
     const auto str = wxString::Format("scale: %f", transform.scale);
-    dc.DrawText(str, 0, 0);
+    dc.draw_text(str, {0, 0}, open_color::white);
 }
 
 class MyFrame: public wxFrame
