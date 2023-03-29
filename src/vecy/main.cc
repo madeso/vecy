@@ -131,15 +131,39 @@ struct CanvasTransform
     }
 };
 
+enum class LineStyle
+    { solid, dot, long_dash, short_dash, dot_dash };
+
+enum class FillStyle {
+    solid, bdiagonal_hatch, crossdiag_hatch, fdiagonal_hatch,
+    cross_hatch, horizontal_hatch, vertical_hatch
+};
+
+struct Outline
+{
+    Rgba color;
+    int width;
+    LineStyle style;
+};
+
+struct Fill
+{
+    Rgba color;
+    FillStyle style;
+};
+
 struct Settings
 {
     Rgba background_color = open_color::gray_9;
     Rgba grid_color = open_color::green_9;
-    Rgba handle_color = open_color::violet_9;
+    Fill handle_color = { open_color::violet_9, FillStyle::solid };
 
+    bool draw_selection_border = true;
     Rgba selection_border = open_color::gray_3;
-    Rgba selection_positive = Rgba{ open_color::blue_9, 100 };
-    Rgba selection_negative = Rgba{ open_color::red_9, 100 };
+
+    bool draw_selection_fill = false;
+    Fill selection_positive = Fill{ Rgba{open_color::blue_9}, FillStyle::bdiagonal_hatch};
+    Fill selection_negative = Fill{ Rgba{open_color::red_9}, FillStyle::fdiagonal_hatch};
 
     float handle_radius = 5.0f;
 };
@@ -213,9 +237,6 @@ Rect from_world_to_screen(const CanvasTransform& t, const Rect& r)
     return {p, s - p};
 }
 
-enum class LineStyle
-    { solid, dot, long_dash, short_dash, dot_dash };
-
 wxPenStyle to_wx(LineStyle style)
 {
     switch (style)
@@ -231,12 +252,22 @@ wxPenStyle to_wx(LineStyle style)
     }
 }
 
-struct Outline
+wxBrushStyle to_wx(FillStyle style)
 {
-    Rgba color;
-    int width;
-    LineStyle style;
-};
+    switch(style)
+    {
+        case FillStyle::solid: return wxBRUSHSTYLE_SOLID;
+        case FillStyle::bdiagonal_hatch: return wxBRUSHSTYLE_BDIAGONAL_HATCH;
+        case FillStyle::crossdiag_hatch: return wxBRUSHSTYLE_CROSSDIAG_HATCH;
+        case FillStyle::fdiagonal_hatch: return wxBRUSHSTYLE_FDIAGONAL_HATCH;
+        case FillStyle::cross_hatch: return wxBRUSHSTYLE_CROSS_HATCH;
+        case FillStyle::horizontal_hatch: return wxBRUSHSTYLE_HORIZONTAL_HATCH;
+        case FillStyle::vertical_hatch: return wxBRUSHSTYLE_VERTICAL_HATCH;
+        default:
+            assert(false);
+            return wxBRUSHSTYLE_SOLID;
+    }
+}
 
 wxPen to_wx(std::optional<Outline> o)
 {
@@ -250,11 +281,11 @@ wxPen to_wx(std::optional<Outline> o)
     }
 }
 
-wxBrush to_wx_brush(std::optional<Rgba> o)
+wxBrush to_wx_brush(std::optional<Fill> o)
 {
     if (o)
     {
-        return wxBrush{ o->to_wx(), wxBRUSHSTYLE_SOLID};
+        return wxBrush{ o->color.to_wx(), to_wx(o->style) };
     }
     else
     {
@@ -267,11 +298,24 @@ bool is_alpha(const Rgba& color)
     return color.a < 255;
 }
 
-bool is_alpha(std::optional<Rgba> color, std::optional<Outline> outline)
+bool is_alpha(std::optional<Fill> fill, std::optional<Outline> outline)
 {
-    if (color && is_alpha(*color)) { return true; }
+    if (fill && is_alpha(fill->color)) { return true; }
     else if (outline && is_alpha(outline->color)) { return true; }
     else { return false; }
+}
+
+template<typename T>
+std::optional<T> get_or_not(T t, bool include)
+{
+    if (include)
+    {
+        return std::move(t);
+    }
+    else
+    {
+        return std::nullopt;
+    }
 }
 
 struct Painter
@@ -292,7 +336,7 @@ struct Painter
         dc->DrawText(str, p.x, p.y);
     }
 
-    void draw_rectangle(const Rect& r, std::optional<Rgba> color, std::optional<Outline> outline)
+    void draw_rectangle(const Rect& r, std::optional<Fill> color, std::optional<Outline> outline)
     {
         if (r.size.x > 0 && r.size.y > 0)
         {
@@ -311,7 +355,7 @@ struct Painter
         }
     }
 
-    void draw_circle(const glm::vec2& p, float radius, std::optional<Rgba> color, std::optional<Outline> outline)
+    void draw_circle(const glm::vec2& p, float radius, std::optional<Fill> color, std::optional<Outline> outline)
     {
         if(is_alpha(color, outline))
         {
@@ -363,7 +407,7 @@ struct RectangleShape : Shape
 
     void paint(Painter* dc, const CanvasTransform& t, const Settings& settings, bool state) override
     {
-        dc->draw_rectangle(from_world_to_screen(t, rect), color, std::nullopt);
+        dc->draw_rectangle(from_world_to_screen(t, rect), Fill{ color, FillStyle::solid}, std::nullopt);
 
         if (state)
         {
@@ -621,7 +665,12 @@ void CanvasWidget::render(Painter& dc)
     {
         auto r = Rect{ mouse0, {0, 0} };
         r.include(latest_mouse);
-        dc.draw_rectangle(r, mouse0.x < latest_mouse.x ? settings.selection_positive : settings.selection_negative, Outline{ settings.selection_border, 1, LineStyle::long_dash });
+        dc.draw_rectangle
+        (
+            r,
+            get_or_not(mouse0.x < latest_mouse.x ? settings.selection_positive : settings.selection_negative, settings.draw_selection_fill),
+            get_or_not(Outline{ settings.selection_border, 1, LineStyle::long_dash }, settings.draw_selection_border)
+        );
     }
 
     const auto str = wxString::Format("scale: %f", transform.scale);
