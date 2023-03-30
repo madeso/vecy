@@ -176,7 +176,8 @@ struct Shape
     explicit Shape(Id i) : id(std::move(i)) {}
     virtual ~Shape() = default;
 
-    virtual void paint(Painter*, const CanvasTransform& transform, const Settings& settings, bool state) = 0;
+    virtual void paint(Painter*, const CanvasTransform& transform, const Settings& settings) = 0;
+    virtual void paint_selected(Painter*, const CanvasTransform& transform, const Settings& settings) = 0;
 
     virtual bool is_hit(const CanvasTransform& t, const glm::vec2& p, float extra) = 0;
 };
@@ -405,19 +406,19 @@ struct RectangleShape : Shape
     {
     }
 
-    void paint(Painter* dc, const CanvasTransform& t, const Settings& settings, bool state) override
+    void paint(Painter* dc, const CanvasTransform& t, const Settings& settings) override
     {
-        dc->draw_rectangle(from_world_to_screen(t, rect), Fill{ color, FillStyle::solid}, std::nullopt);
+        dc->draw_rectangle(from_world_to_screen(t, rect), Fill{ color, FillStyle::solid }, std::nullopt);
+    }
 
-        if (state)
-        {
-            const auto dx = glm::vec2{ rect.size.x, 0 };
-            const auto dy = glm::vec2{ 0, rect.size.y };
-            dc->draw_circle(t.from_world_to_screen(rect.topleft), settings.handle_radius, settings.handle_color, std::nullopt);
-            dc->draw_circle(t.from_world_to_screen(rect.topleft + dx), settings.handle_radius, settings.handle_color, std::nullopt);
-            dc->draw_circle(t.from_world_to_screen(rect.topleft + dy), settings.handle_radius, settings.handle_color, std::nullopt);
-            dc->draw_circle(t.from_world_to_screen(rect.topleft + dx + dy), settings.handle_radius, settings.handle_color, std::nullopt);
-        }
+    void paint_selected(Painter* dc, const CanvasTransform& t, const Settings& settings) override
+    {
+        const auto dx = glm::vec2{ rect.size.x, 0 };
+        const auto dy = glm::vec2{ 0, rect.size.y };
+        dc->draw_circle(t.from_world_to_screen(rect.topleft), settings.handle_radius, settings.handle_color, std::nullopt);
+        dc->draw_circle(t.from_world_to_screen(rect.topleft + dx), settings.handle_radius, settings.handle_color, std::nullopt);
+        dc->draw_circle(t.from_world_to_screen(rect.topleft + dy), settings.handle_radius, settings.handle_color, std::nullopt);
+        dc->draw_circle(t.from_world_to_screen(rect.topleft + dx + dy), settings.handle_radius, settings.handle_color, std::nullopt);
     }
 
     bool is_hit(const CanvasTransform& t, const glm::vec2& p, float extra) override
@@ -654,10 +655,19 @@ void CanvasWidget::render(Painter& dc)
         }
     }
 
+    // draw all shapes
     for (auto& shape : shapes)
     {
-        const auto is_hovering = hovers.find(shape.first) != hovers.end();
-        shape.second->paint(&dc, trans, settings, is_hovering);
+        shape.second->paint(&dc, trans, settings);
+    }
+
+    // draw selection outline
+    for (const auto& id : hovers)
+    {
+        auto found = shapes.find(id);
+        if (found == shapes.end()) { assert(false); continue; }
+
+        found->second->paint_selected(&dc, trans, settings);
     }
 
     // draw selection box
