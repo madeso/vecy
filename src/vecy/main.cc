@@ -158,12 +158,16 @@ struct Settings
     Rgba grid_color = open_color::green_9;
     Fill handle_color = { open_color::violet_9, FillStyle::solid };
 
-    bool draw_selection_border = true;
-    Rgba selection_border = open_color::gray_3;
 
-    bool draw_selection_fill = false;
-    Fill selection_positive = Fill{ Rgba{open_color::blue_9}, FillStyle::bdiagonal_hatch};
-    Fill selection_negative = Fill{ Rgba{open_color::red_9}, FillStyle::fdiagonal_hatch};
+    // posive: only fully enclosed are selected
+    // negative: also include intersecting
+    bool draw_selection_border = true;
+    Outline selection_border_positive = {open_color::gray_3, 1, LineStyle::solid};
+    Outline selection_border_negative = {open_color::gray_3, 1, LineStyle::long_dash};
+
+    bool draw_selection_fill = true;
+    Fill selection_fill_positive = Fill{ Rgba{open_color::blue_9}, FillStyle::bdiagonal_hatch};
+    Fill selection_fill_negative = Fill{ Rgba{open_color::green_9}, FillStyle::fdiagonal_hatch};
 
     float handle_radius = 5.0f;
 };
@@ -675,11 +679,15 @@ void CanvasWidget::render(Painter& dc)
     {
         auto r = Rect{ mouse0, {0, 0} };
         r.include(latest_mouse);
+
+        const bool is_positive = mouse0.x < latest_mouse.x;
+        const auto selection_fill = is_positive ? settings.selection_fill_positive : settings.selection_fill_negative;
+        const auto selection_border = is_positive ? settings.selection_border_positive : settings.selection_border_negative;
         dc.draw_rectangle
         (
             r,
-            get_or_not(mouse0.x < latest_mouse.x ? settings.selection_positive : settings.selection_negative, settings.draw_selection_fill),
-            get_or_not(Outline{ settings.selection_border, 1, LineStyle::long_dash }, settings.draw_selection_border)
+            get_or_not(selection_fill, settings.draw_selection_fill),
+            get_or_not(selection_border, settings.draw_selection_border)
         );
     }
 
